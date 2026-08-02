@@ -157,6 +157,10 @@ pub fn display_to_info(display: &Display, focused_display: u32) -> OutputInfo {
         y: display.frame.y,
         width: display.frame.width,
         height: display.frame.height,
+        physical_x: display.physical_frame.x,
+        physical_y: display.physical_frame.y,
+        physical_width: display.physical_frame.width,
+        physical_height: display.physical_frame.height,
         is_main: display.is_main,
         visible_tags: display.visible_tags.mask(),
         is_focused: focused_display == display.id,
@@ -201,6 +205,12 @@ mod tests {
         Display::new(
             id,
             name.to_string(),
+            Rect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+            },
             Rect {
                 x: 0,
                 y: 0,

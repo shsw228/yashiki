@@ -197,6 +197,7 @@ pub fn sync_all<W: WindowSystem>(state: &mut State, ws: &W) -> (Vec<WindowMove>,
             .and_modify(|display| {
                 display.name = info.name.clone();
                 display.frame = Rect::from_bounds(&info.frame);
+                display.physical_frame = Rect::from_bounds(&info.physical_frame);
                 display.is_main = info.is_main;
             })
             .or_insert_with(|| {
@@ -204,6 +205,7 @@ pub fn sync_all<W: WindowSystem>(state: &mut State, ws: &W) -> (Vec<WindowMove>,
                     info.id,
                     info.name.clone(),
                     Rect::from_bounds(&info.frame),
+                    Rect::from_bounds(&info.physical_frame),
                     info.is_main,
                 )
             });

@@ -10,7 +10,10 @@ use super::{Rect, Tag, WindowId};
 pub struct Display {
     pub id: DisplayId,
     pub name: String,
+    /// Usable area: the physical bounds minus what the menu bar reserves.
     pub frame: Rect,
+    /// Physical bounds of the display.
+    pub physical_frame: Rect,
     pub is_main: bool,
     pub visible_tags: Tag,
     pub previous_visible_tags: Tag,
@@ -29,11 +32,18 @@ pub struct Display {
 }
 
 impl Display {
-    pub fn new(id: DisplayId, name: String, frame: Rect, is_main: bool) -> Self {
+    pub fn new(
+        id: DisplayId,
+        name: String,
+        frame: Rect,
+        physical_frame: Rect,
+        is_main: bool,
+    ) -> Self {
         Self {
             id,
             name,
             frame,
+            physical_frame,
             is_main,
             visible_tags: Tag::new(1),
             previous_visible_tags: Tag::new(1),

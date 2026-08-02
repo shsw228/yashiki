@@ -823,10 +823,17 @@ pub struct BindingInfo {
 pub struct OutputInfo {
     pub id: u32,
     pub name: String,
+    /// Usable area: the physical bounds minus what the menu bar reserves.
     pub x: i32,
     pub y: i32,
     pub width: u32,
     pub height: u32,
+    /// Physical bounds of the display. The difference from the usable area tells
+    /// a subscriber how much is reserved, which is otherwise not derivable.
+    pub physical_x: i32,
+    pub physical_y: i32,
+    pub physical_width: u32,
+    pub physical_height: u32,
     pub is_main: bool,
     pub visible_tags: u32,
     pub is_focused: bool,

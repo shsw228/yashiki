@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use crate::core::Rect;
 use crate::macos::DisplayId;
 use crate::platform::WindowSystem;
 use yashiki_ipc::OutputDirection;
@@ -27,6 +28,29 @@ pub fn handle_display_change<W: WindowSystem>(state: &mut State, ws: &W) -> Disp
 
     let removed_ids: Vec<_> = previous_ids.difference(&current_ids).copied().collect();
     let added_ids: HashSet<_> = current_ids.difference(&previous_ids).copied().collect();
+
+    // The OS emits several notifications around one configuration change, and some
+    // of them describe a configuration we already hold. Retiling on those moves
+    // every window for nothing, so compare first and bail out when nothing moved.
+    if removed_ids.is_empty() && added_ids.is_empty() {
+        let unchanged = display_infos.iter().all(|info| {
+            state.displays.get(&info.id).is_some_and(|display| {
+                display.name == info.name
+                    && display.is_main == info.is_main
+                    && display.frame == Rect::from_bounds(&info.frame)
+            })
+        });
+        if unchanged {
+            tracing::debug!("Display configuration unchanged, nothing to do");
+            return DisplayChangeResult {
+                window_moves: vec![],
+                displays_to_retile: vec![],
+                added: vec![],
+                removed: vec![],
+                new_window_ids: vec![],
+            };
+        }
+    }
 
     // === Reconnect branch: no displays removed, possibly some added ===
     if removed_ids.is_empty() {

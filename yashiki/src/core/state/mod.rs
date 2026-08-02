@@ -1483,6 +1483,56 @@ mod tests {
     }
 
     #[test]
+    fn test_handle_display_change_unchanged_configuration_is_a_no_op() {
+        let ws = MockWindowSystem::new()
+            .with_displays(vec![
+                create_test_display(1, 0.0, 0.0, 1920.0, 1080.0),
+                create_test_display(2, 1920.0, 0.0, 1920.0, 1080.0),
+            ])
+            .with_windows(vec![create_test_window(
+                100, 1000, "Safari", 100.0, 100.0, 800.0, 600.0,
+            )])
+            .with_focused(Some(100));
+
+        let mut state = State::new();
+        state.sync_all(&ws);
+
+        // Same configuration read again: nothing to add, remove or retile.
+        let result = state.handle_display_change(&ws);
+
+        assert!(result.added.is_empty());
+        assert!(result.removed.is_empty());
+        assert!(result.displays_to_retile.is_empty());
+        assert!(result.window_moves.is_empty());
+        assert_eq!(state.displays.len(), 2);
+    }
+
+    #[test]
+    fn test_handle_display_change_moved_display_still_retiles() {
+        let ws1 = MockWindowSystem::new()
+            .with_displays(vec![create_test_display(1, 0.0, 0.0, 1920.0, 1080.0)])
+            .with_windows(vec![create_test_window(
+                100, 1000, "Safari", 100.0, 100.0, 800.0, 600.0,
+            )])
+            .with_focused(Some(100));
+
+        let mut state = State::new();
+        state.sync_all(&ws1);
+
+        // Same display id, different frame: the menu bar appearing looks like this.
+        let ws2 = MockWindowSystem::new()
+            .with_displays(vec![create_test_display(1, 0.0, 30.0, 1920.0, 1050.0)])
+            .with_windows(vec![create_test_window(
+                100, 1000, "Safari", 100.0, 100.0, 800.0, 600.0,
+            )])
+            .with_focused(Some(100));
+
+        let result = state.handle_display_change(&ws2);
+
+        assert!(!result.displays_to_retile.is_empty());
+    }
+
+    #[test]
     fn test_handle_display_change_display_removed() {
         let ws1 = MockWindowSystem::new()
             .with_displays(vec![

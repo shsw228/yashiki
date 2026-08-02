@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::mpsc as std_mpsc;
 use std::sync::Arc;
 
@@ -103,17 +103,23 @@ pub fn terminate_process(pid: u32) {
     }
 }
 
+// Display events no longer travel this channel, so every remaining variant is an
+// app lifecycle notification. The shared prefix is the point.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone)]
 pub enum WorkspaceEvent {
     AppLaunched { pid: i32 },
     AppTerminated { pid: i32 },
     AppActivated { pid: i32 },
-    DisplaysChanged,
 }
 
 struct Ivars {
     event_tx: RefCell<Option<std_mpsc::Sender<WorkspaceEvent>>>,
     source_ptr: Arc<AtomicPtr<c_void>>,
+    /// Screen-parameter changes are folded into the display reconfiguration
+    /// source so that both paths collapse into a single reconcile.
+    display_pending: Arc<AtomicBool>,
+    display_source_ptr: Arc<AtomicPtr<c_void>>,
 }
 
 define_class!(
@@ -163,11 +169,8 @@ define_class!(
         #[unsafe(method(displaysChanged:))]
         fn displays_changed(&self, _notification: &NSNotification) {
             tracing::debug!("Screen parameters changed");
-            let tx = self.ivars().event_tx.borrow();
-            if let Some(sender) = tx.as_ref() {
-                let _: Result<(), _> = sender.send(WorkspaceEvent::DisplaysChanged);
-            }
-            signal_runloop_source(&self.ivars().source_ptr);
+            self.ivars().display_pending.store(true, Ordering::Relaxed);
+            signal_runloop_source(&self.ivars().display_source_ptr);
         }
     }
 );
@@ -196,12 +199,16 @@ impl WorkspaceObserver {
     fn new(
         event_tx: std_mpsc::Sender<WorkspaceEvent>,
         source_ptr: Arc<AtomicPtr<c_void>>,
+        display_pending: Arc<AtomicBool>,
+        display_source_ptr: Arc<AtomicPtr<c_void>>,
         mtm: MainThreadMarker,
     ) -> Retained<Self> {
         let this = mtm.alloc::<Self>();
         let this = this.set_ivars(Ivars {
             event_tx: RefCell::new(Some(event_tx)),
             source_ptr,
+            display_pending,
+            display_source_ptr,
         });
         unsafe { msg_send![super(this), init] }
     }
@@ -215,9 +222,12 @@ impl WorkspaceWatcher {
     pub fn new(
         event_tx: std_mpsc::Sender<WorkspaceEvent>,
         source_ptr: Arc<AtomicPtr<c_void>>,
+        display_pending: Arc<AtomicBool>,
+        display_source_ptr: Arc<AtomicPtr<c_void>>,
         mtm: MainThreadMarker,
     ) -> Self {
-        let observer = WorkspaceObserver::new(event_tx, source_ptr, mtm);
+        let observer =
+            WorkspaceObserver::new(event_tx, source_ptr, display_pending, display_source_ptr, mtm);
 
         unsafe {
             let workspace = NSWorkspace::sharedWorkspace();

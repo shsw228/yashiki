@@ -1,6 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::ptr;
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::mpsc as std_mpsc;
 use std::sync::Arc;
 use std::time::Instant;
@@ -266,6 +266,10 @@ struct RunLoopContext {
     is_file_logging: bool,
     last_focused_window_destroyed_at: Cell<Option<Instant>>,
     status_item: RefCell<Option<MenuBarTagItem>>,
+    /// Set by the screen-parameters observer. Both it and the CoreGraphics
+    /// callback signal the same run loop source, so signals raised in one turn
+    /// collapse into a single reconcile.
+    display_pending: Arc<AtomicBool>,
 }
 
 impl RunLoopContext {
@@ -314,6 +318,7 @@ impl RunLoopContext {
     /// Re-read the display configuration from the OS and reconcile state with it.
     /// Backs both the reconfiguration callback and the screen-parameters notification.
     fn reconcile_displays(&self) {
+        tracing::debug!("Reconciling displays");
         // Capture state before display change for event emission
         let pre_state = capture_event_state(&self.state);
 
@@ -487,8 +492,14 @@ impl App {
 
         // Start workspace watcher for app launch/terminate notifications
         let (workspace_event_tx, workspace_event_rx) = std_mpsc::channel::<WorkspaceEvent>();
-        let _workspace_watcher =
-            WorkspaceWatcher::new(workspace_event_tx, workspace_source_ptr.clone(), mtm);
+        let display_pending = Arc::new(AtomicBool::new(false));
+        let _workspace_watcher = WorkspaceWatcher::new(
+            workspace_event_tx,
+            workspace_source_ptr.clone(),
+            Arc::clone(&display_pending),
+            display_source_ptr.clone(),
+            mtm,
+        );
 
         // Initialize state with current windows
         let window_system = MacOSWindowSystem;
@@ -562,6 +573,7 @@ impl App {
             is_file_logging,
             last_focused_window_destroyed_at: Cell::new(None),
             status_item,
+            display_pending: Arc::clone(&display_pending),
         });
 
         let context_raw = Box::into_raw(context);
@@ -942,12 +954,33 @@ impl App {
         extern "C" fn display_source_callback(info: *const std::ffi::c_void) {
             let ctx = unsafe { &*(info as *const RunLoopContext) };
 
+            // CoreGraphics delivers one callback per affected display, and
+            // handle_display_change reconciles the full configuration, so drain the
+            // queue and reconcile once rather than repeating it per event.
+            let mut pending = 0usize;
             while let Ok(event) = ctx.display_reconfig_rx.try_recv() {
                 tracing::info!(
                     "Display reconfiguration: display_id={}, flags={:#x}",
                     event.display_id,
                     event.flags
                 );
+                pending += 1;
+            }
+
+            // Screen-parameter changes land here too. A menu bar toggle raises only
+            // this flag; a real reconfiguration raises both, and because they signal
+            // the same source the run loop delivers one callback for the pair.
+            //
+            // Relaxed is enough: the flag guards no other memory and both the observer
+            // that sets it and this callback run on the main thread. Everything it
+            // stands for is re-read from the OS below.
+            let by_notification = ctx.display_pending.swap(false, Ordering::Relaxed);
+
+            if pending > 0 || by_notification {
+                if pending > 1 {
+                    tracing::debug!("Coalesced {} display reconfiguration events", pending);
+                }
+
                 ctx.reconcile_displays();
             }
         }
@@ -1163,12 +1196,6 @@ impl App {
                         } else {
                             tracing::debug!("App activated (already tracked), pid {}", pid);
                         }
-                    }
-                    WorkspaceEvent::DisplaysChanged => {
-                        // Showing or hiding the menu bar changes the usable area
-                        // without a display reconfiguration, so this is the only
-                        // trigger for it.
-                        ctx.reconcile_displays();
                     }
                 }
             }

@@ -311,6 +311,72 @@ impl RunLoopContext {
         }
     }
 
+    /// Re-read the display configuration from the OS and reconcile state with it.
+    /// Backs both the reconfiguration callback and the screen-parameters notification.
+    fn reconcile_displays(&self) {
+        // Capture state before display change for event emission
+        let pre_state = capture_event_state(&self.state);
+
+        // Handle display change
+        let result = self
+            .state
+            .borrow_mut()
+            .handle_display_change(&self.window_system);
+
+        // Emit display add/remove/update events (not covered by emit_state_change_events)
+        let focused_display = self.state.borrow().focused_display;
+        for display in &result.added {
+            self.event_emitter
+                .emit_display_added(display, focused_display);
+        }
+        for display_id in &result.removed {
+            self.event_emitter.emit_display_removed(*display_id);
+        }
+        {
+            let state = self.state.borrow();
+            for disp in state.displays.values() {
+                self.event_emitter
+                    .emit_display_updated(disp, focused_display);
+            }
+        }
+
+        // Apply window moves for orphaned windows
+        if !result.window_moves.is_empty() {
+            self.window_manipulator
+                .apply_window_moves(&result.window_moves);
+        }
+
+        // Apply rules to newly discovered windows
+        process_new_windows(
+            result.new_window_ids,
+            &self.state,
+            &self.layout_engine_manager,
+            &self.window_manipulator,
+            &self.event_emitter,
+        );
+
+        // Retile affected displays
+        if !result.displays_to_retile.is_empty() {
+            for display_id in result.displays_to_retile {
+                do_retile_display(
+                    &self.state,
+                    &self.layout_engine_manager,
+                    &self.window_manipulator,
+                    display_id,
+                );
+            }
+        } else {
+            do_retile(
+                &self.state,
+                &self.layout_engine_manager,
+                &self.window_manipulator,
+            );
+        }
+
+        // Emit state change events (DisplayFocused, WindowUpdated, WindowDestroyed, TagsChanged, etc.)
+        self.emit_state_change_events(&pre_state);
+    }
+
     fn quit(&self) {
         for process in self.state.borrow().tracked_processes.iter() {
             self.window_manipulator.terminate_process(process.pid);
@@ -876,75 +942,13 @@ impl App {
         extern "C" fn display_source_callback(info: *const std::ffi::c_void) {
             let ctx = unsafe { &*(info as *const RunLoopContext) };
 
-            // Process all pending display reconfig events
             while let Ok(event) = ctx.display_reconfig_rx.try_recv() {
                 tracing::info!(
                     "Display reconfiguration: display_id={}, flags={:#x}",
                     event.display_id,
                     event.flags
                 );
-
-                // Capture state before display change for event emission
-                let pre_state = capture_event_state(&ctx.state);
-
-                // Handle display change
-                let result = ctx
-                    .state
-                    .borrow_mut()
-                    .handle_display_change(&ctx.window_system);
-
-                // Emit display add/remove/update events (not covered by emit_state_change_events)
-                let focused_display = ctx.state.borrow().focused_display;
-                for display in &result.added {
-                    ctx.event_emitter
-                        .emit_display_added(display, focused_display);
-                }
-                for display_id in &result.removed {
-                    ctx.event_emitter.emit_display_removed(*display_id);
-                }
-                {
-                    let state = ctx.state.borrow();
-                    for disp in state.displays.values() {
-                        ctx.event_emitter
-                            .emit_display_updated(disp, focused_display);
-                    }
-                }
-
-                // Apply window moves for orphaned windows
-                if !result.window_moves.is_empty() {
-                    ctx.window_manipulator
-                        .apply_window_moves(&result.window_moves);
-                }
-
-                // Apply rules to newly discovered windows
-                process_new_windows(
-                    result.new_window_ids,
-                    &ctx.state,
-                    &ctx.layout_engine_manager,
-                    &ctx.window_manipulator,
-                    &ctx.event_emitter,
-                );
-
-                // Retile affected displays
-                if !result.displays_to_retile.is_empty() {
-                    for display_id in result.displays_to_retile {
-                        do_retile_display(
-                            &ctx.state,
-                            &ctx.layout_engine_manager,
-                            &ctx.window_manipulator,
-                            display_id,
-                        );
-                    }
-                } else {
-                    do_retile(
-                        &ctx.state,
-                        &ctx.layout_engine_manager,
-                        &ctx.window_manipulator,
-                    );
-                }
-
-                // Emit state change events (DisplayFocused, WindowUpdated, WindowDestroyed, TagsChanged, etc.)
-                ctx.emit_state_change_events(&pre_state);
+                ctx.reconcile_displays();
             }
         }
 
@@ -1161,10 +1165,10 @@ impl App {
                         }
                     }
                     WorkspaceEvent::DisplaysChanged => {
-                        // Handled by display_source_callback via CGDisplayRegisterReconfigurationCallback
-                        tracing::debug!(
-                            "DisplaysChanged event received (handled by display callback)"
-                        );
+                        // Showing or hiding the menu bar changes the usable area
+                        // without a display reconfiguration, so this is the only
+                        // trigger for it.
+                        ctx.reconcile_displays();
                     }
                 }
             }

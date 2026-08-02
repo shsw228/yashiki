@@ -206,10 +206,16 @@ pub fn get_all_displays() -> Vec<DisplayInfo> {
     }
 
     let main_display_id = unsafe { CGMainDisplayID() };
-    let menu_bar_heights = detect_menu_bar_heights();
 
-    // Get display names from NSScreen (names don't change with resolution)
-    let display_names = get_display_names();
+    // NSScreen is main-thread only. Everything else here is CoreGraphics, which is
+    // not, so fall back to bare geometry rather than refusing to report displays.
+    let mtm = MainThreadMarker::new();
+    if mtm.is_none() {
+        tracing::error!("get_all_displays called off the main thread; names and menu bar insets unavailable");
+    }
+    let menu_bar_heights = mtm.map(detect_menu_bar_heights).unwrap_or_default();
+    // Names don't change with resolution.
+    let display_names = mtm.map(get_display_names).unwrap_or_default();
 
     display_ids
         .iter()
@@ -242,8 +248,7 @@ pub fn get_all_displays() -> Vec<DisplayInfo> {
 }
 
 /// Get display names from NSScreen (best effort, may be cached but names don't change)
-fn get_display_names() -> HashMap<DisplayId, String> {
-    let mtm = unsafe { MainThreadMarker::new_unchecked() };
+fn get_display_names(mtm: MainThreadMarker) -> HashMap<DisplayId, String> {
     let screens = NSScreen::screens(mtm);
 
     screens
@@ -330,8 +335,7 @@ pub fn has_popup_menu_on_screen() -> bool {
 /// Scanning the window list for the menu bar was tried and does not work: it
 /// reports whether the menu bar is drawn right now, not whether it reserves
 /// space, and the window is intermittently absent even when it does.
-fn detect_menu_bar_heights() -> HashMap<DisplayId, f64> {
-    let mtm = unsafe { MainThreadMarker::new_unchecked() };
+fn detect_menu_bar_heights(mtm: MainThreadMarker) -> HashMap<DisplayId, f64> {
     let screens = NSScreen::screens(mtm);
 
     screens

@@ -617,17 +617,41 @@ pub fn process_command(
         }),
 
         // Outer gap
-        Command::SetOuterGap { values } => match OuterGap::from_args(values) {
-            Some(gap) => {
-                tracing::info!("Set outer gap: {}", gap);
-                state.config.outer_gap = gap;
-                CommandResult::ok_with_effects(vec![Effect::Retile])
-            }
-            None => CommandResult::error("usage: set-outer-gap <all> | <v h> | <t r b l>"),
+        Command::SetOuterGap { values, output } => match OuterGap::from_args(values) {
+            Some(gap) => match output {
+                Some(spec) => match state.get_target_display(Some(spec)) {
+                    Ok(display_id) => {
+                        tracing::info!("Set outer gap for display {}: {}", display_id, gap);
+                        if let Some(display) = state.displays.get_mut(&display_id) {
+                            display.outer_gap = Some(gap);
+                        }
+                        CommandResult::ok_with_effects(vec![Effect::RetileDisplays(vec![
+                            display_id,
+                        ])])
+                    }
+                    Err(e) => CommandResult::error(e),
+                },
+                None => {
+                    tracing::info!("Set outer gap: {}", gap);
+                    state.config.outer_gap = gap;
+                    CommandResult::ok_with_effects(vec![Effect::Retile])
+                }
+            },
+            None => CommandResult::error(
+                "usage: set-outer-gap [--output <id|name>] <all> | <v h> | <t r b l>",
+            ),
         },
-        Command::GetOuterGap => CommandResult::with_response(Response::OuterGap {
-            outer_gap: state.config.outer_gap,
-        }),
+        Command::GetOuterGap { output } => match output {
+            Some(spec) => match state.get_target_display(Some(spec)) {
+                Ok(display_id) => CommandResult::with_response(Response::OuterGap {
+                    outer_gap: state.outer_gap_for(display_id),
+                }),
+                Err(e) => CommandResult::error(e),
+            },
+            None => CommandResult::with_response(Response::OuterGap {
+                outer_gap: state.config.outer_gap,
+            }),
+        },
 
         // Log level - handled in ipc_source_callback (needs RunLoopContext)
         Command::SetLogLevel { .. } | Command::GetLogLevel => CommandResult::ok(),

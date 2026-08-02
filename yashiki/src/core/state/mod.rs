@@ -7,7 +7,7 @@ use crate::event::Event;
 use crate::macos::DisplayId;
 use crate::platform::WindowSystem;
 use yashiki_ipc::{
-    Direction, OutputDirection, OutputSpecifier, RuleAction, RuleMatcher, WindowRule,
+    Direction, OuterGap, OutputDirection, OutputSpecifier, RuleAction, RuleMatcher, WindowRule,
 };
 
 /// Information about a window that was ignored by rule, tracked for re-evaluation.
@@ -589,6 +589,15 @@ impl State {
             }
         }
         self.focused_display
+    }
+
+    /// Outer gap in effect for a display: its own override if set, otherwise the
+    /// global default.
+    pub fn outer_gap_for(&self, display_id: DisplayId) -> OuterGap {
+        self.displays
+            .get(&display_id)
+            .and_then(|d| d.outer_gap)
+            .unwrap_or(self.config.outer_gap)
     }
 
     pub fn get_target_display(
@@ -1452,6 +1461,39 @@ mod tests {
 
         let visible = state.visible_windows_on_display(1);
         assert_eq!(visible.len(), 2);
+    }
+
+    #[test]
+    fn test_outer_gap_falls_back_to_global() {
+        let ws = MockWindowSystem::new()
+            .with_displays(vec![
+                create_test_display(1, 0.0, 0.0, 1920.0, 1080.0),
+                create_test_display(2, 1920.0, 0.0, 1920.0, 1080.0),
+            ])
+            .with_windows(vec![])
+            .with_focused(None);
+
+        let mut state = State::new();
+        state.sync_all(&ws);
+        state.config.outer_gap = OuterGap::all(12);
+
+        assert_eq!(state.outer_gap_for(1), OuterGap::all(12));
+        assert_eq!(state.outer_gap_for(2), OuterGap::all(12));
+
+        // A per-display override only affects that display.
+        let override_gap = OuterGap {
+            top: 10,
+            right: 12,
+            bottom: 12,
+            left: 12,
+        };
+        state.displays.get_mut(&1).unwrap().outer_gap = Some(override_gap);
+
+        assert_eq!(state.outer_gap_for(1), override_gap);
+        assert_eq!(state.outer_gap_for(2), OuterGap::all(12));
+
+        // An unknown display falls back to the global value.
+        assert_eq!(state.outer_gap_for(99), OuterGap::all(12));
     }
 
     #[test]

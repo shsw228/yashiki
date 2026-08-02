@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::time::Instant;
 
 use crate::macos::DisplayId;
+use yashiki_ipc::OuterGap;
 
 use super::{Rect, Tag, WindowId};
 
@@ -20,6 +21,11 @@ pub struct Display {
     pub last_focused_per_tag: HashMap<u8, (WindowId, Instant)>,
     pub current_layout: Option<String>,
     pub previous_layout: Option<String>,
+    /// Overrides the global outer gap for this display. Needed when displays
+    /// reserve different amounts at the top: a notched built-in panel keeps its
+    /// menu bar strip even when the menu bar auto-hides, so a gap calibrated for
+    /// an external display leaves a visible band there.
+    pub outer_gap: Option<OuterGap>,
 }
 
 impl Display {
@@ -35,6 +41,7 @@ impl Display {
             last_focused_per_tag: HashMap::new(),
             current_layout: None,
             previous_layout: None,
+            outer_gap: None,
         }
     }
 }

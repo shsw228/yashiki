@@ -526,6 +526,9 @@ struct GetMenuBarStatusCmd {}
 #[derive(FromArgs)]
 #[argh(subcommand, name = "set-outer-gap")]
 struct SetOuterGapCmd {
+    /// output (display) ID or name; omit to set the global default
+    #[argh(option)]
+    output: Option<String>,
     /// gap values: <all> | <v h> | <t r b l> (CSS-style: 1, 2, or 4 values)
     #[argh(positional, greedy)]
     values: Vec<String>,
@@ -534,7 +537,11 @@ struct SetOuterGapCmd {
 /// Get current outer gap
 #[derive(FromArgs)]
 #[argh(subcommand, name = "get-outer-gap")]
-struct GetOuterGapCmd {}
+struct GetOuterGapCmd {
+    /// output (display) ID or name
+    #[argh(option)]
+    output: Option<String>,
+}
 
 /// Set the log level at runtime (file logging mode only)
 #[derive(FromArgs)]
@@ -1090,9 +1097,14 @@ fn to_command(subcmd: SubCommand) -> Result<Command> {
                     cmd.values.len()
                 );
             }
-            Ok(Command::SetOuterGap { values: cmd.values })
+            Ok(Command::SetOuterGap {
+                values: cmd.values,
+                output: parse_output_specifier(cmd.output),
+            })
         }
-        SubCommand::GetOuterGap(_) => Ok(Command::GetOuterGap),
+        SubCommand::GetOuterGap(cmd) => Ok(Command::GetOuterGap {
+            output: parse_output_specifier(cmd.output),
+        }),
         SubCommand::SetLogLevel(cmd) => Ok(Command::SetLogLevel { level: cmd.level }),
         SubCommand::GetLogLevel(_) => Ok(Command::GetLogLevel),
         SubCommand::Quit(_) => Ok(Command::Quit),
@@ -1403,9 +1415,17 @@ fn parse_command(args: &[String]) -> Result<Command> {
                     cmd.values.len()
                 );
             }
-            Ok(Command::SetOuterGap { values: cmd.values })
+            Ok(Command::SetOuterGap {
+                values: cmd.values,
+                output: parse_output_specifier(cmd.output),
+            })
         }
-        "get-outer-gap" => Ok(Command::GetOuterGap),
+        "get-outer-gap" => {
+            let cmd: GetOuterGapCmd = from_argh(cmd_name, &cmd_args)?;
+            Ok(Command::GetOuterGap {
+                output: parse_output_specifier(cmd.output),
+            })
+        }
         "set-log-level" => {
             let cmd: SetLogLevelCmd = from_argh(cmd_name, &cmd_args)?;
             Ok(Command::SetLogLevel { level: cmd.level })

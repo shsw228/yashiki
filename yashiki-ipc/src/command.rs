@@ -750,8 +750,11 @@ pub enum Command {
     // Outer gap
     SetOuterGap {
         values: Vec<String>,
+        output: Option<OutputSpecifier>,
     },
-    GetOuterGap,
+    GetOuterGap {
+        output: Option<OutputSpecifier>,
+    },
 
     // Log level
     SetLogLevel {
@@ -1776,6 +1779,7 @@ mod tests {
     fn test_command_set_outer_gap_serialization() {
         let cmd = Command::SetOuterGap {
             values: vec!["10".to_string()],
+            output: None,
         };
         let json = serde_json::to_string(&cmd).unwrap();
         assert!(json.contains("\"type\":\"set_outer_gap\""));
@@ -1783,8 +1787,9 @@ mod tests {
 
         let deserialized: Command = serde_json::from_str(&json).unwrap();
         match deserialized {
-            Command::SetOuterGap { values } => {
+            Command::SetOuterGap { values, output } => {
                 assert_eq!(values, vec!["10"]);
+                assert_eq!(output, None);
             }
             _ => panic!("Wrong variant"),
         }
@@ -1792,12 +1797,28 @@ mod tests {
         // With two values
         let cmd = Command::SetOuterGap {
             values: vec!["10".to_string(), "20".to_string()],
+            output: None,
         };
         let json = serde_json::to_string(&cmd).unwrap();
         let deserialized: Command = serde_json::from_str(&json).unwrap();
         match deserialized {
-            Command::SetOuterGap { values } => {
+            Command::SetOuterGap { values, output } => {
                 assert_eq!(values, vec!["10", "20"]);
+                assert_eq!(output, None);
+            }
+            _ => panic!("Wrong variant"),
+        }
+
+        // Targeting a specific display
+        let cmd = Command::SetOuterGap {
+            values: vec!["10".to_string()],
+            output: Some(OutputSpecifier::Id(1)),
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        let deserialized: Command = serde_json::from_str(&json).unwrap();
+        match deserialized {
+            Command::SetOuterGap { output, .. } => {
+                assert_eq!(output, Some(OutputSpecifier::Id(1)));
             }
             _ => panic!("Wrong variant"),
         }
@@ -1805,12 +1826,15 @@ mod tests {
 
     #[test]
     fn test_command_get_outer_gap_serialization() {
-        let cmd = Command::GetOuterGap;
+        let cmd = Command::GetOuterGap { output: None };
         let json = serde_json::to_string(&cmd).unwrap();
         assert!(json.contains("\"type\":\"get_outer_gap\""));
 
         let deserialized: Command = serde_json::from_str(&json).unwrap();
-        assert!(matches!(deserialized, Command::GetOuterGap));
+        assert!(matches!(
+            deserialized,
+            Command::GetOuterGap { output: None }
+        ));
     }
 
     #[test]

@@ -30,6 +30,10 @@ extern "C" {
     ) -> i32;
 }
 
+/// `kCGDisplayBeginConfigurationFlag`. Set on the callback that fires *before*
+/// the change, when the display metrics still describe the old configuration.
+const K_CG_DISPLAY_BEGIN_CONFIGURATION_FLAG: u32 = 1 << 0;
+
 #[derive(Debug, Clone)]
 pub struct DisplayReconfigEvent {
     pub display_id: DisplayId,
@@ -48,6 +52,11 @@ extern "C" fn display_reconfig_callback(
     flags: u32,
     _user_info: *mut c_void,
 ) {
+    // Handling the pre-change notification would retile against stale geometry.
+    if flags & K_CG_DISPLAY_BEGIN_CONFIGURATION_FLAG != 0 {
+        return;
+    }
+
     if let Some(state) = DISPLAY_CALLBACK_STATE.get() {
         let _ = state.tx.send(DisplayReconfigEvent { display_id, flags });
 

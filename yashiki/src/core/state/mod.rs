@@ -838,6 +838,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::macos::{Bounds, DisplayInfo};
     use crate::platform::mock::{
         create_test_display, create_test_window, create_test_window_with_layer, MockWindowSystem,
     };
@@ -1527,6 +1528,63 @@ mod tests {
         assert_eq!(result.added[0].id, 2);
         assert!(result.removed.is_empty());
         assert_eq!(state.displays.len(), 2);
+    }
+
+    /// `physical_frame` is reported over IPC and is not derivable from `frame`, so a
+    /// change confined to it still has to be picked up. Taking the unchanged early exit
+    /// here would leave state serving the stale bounds with no event emitted.
+    #[test]
+    fn test_handle_display_change_physical_frame_only_change_is_not_a_no_op() {
+        let display_with = |frame: Bounds, physical_frame: Bounds| DisplayInfo {
+            id: 1,
+            name: "Display 1".to_string(),
+            frame,
+            physical_frame,
+            is_main: true,
+        };
+        let usable = Bounds {
+            x: 0.0,
+            y: 25.0,
+            width: 1920.0,
+            height: 1055.0,
+        };
+
+        let ws = MockWindowSystem::new()
+            .with_displays(vec![display_with(
+                usable,
+                Bounds {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 1920.0,
+                    height: 1080.0,
+                },
+            )])
+            .with_windows(vec![create_test_window(
+                100, 1000, "Safari", 100.0, 100.0, 800.0, 600.0,
+            )])
+            .with_focused(Some(100));
+
+        let mut state = State::new();
+        state.sync_all(&ws);
+
+        // Same usable frame, taller physical bounds: only `physical_frame` moved.
+        let grown = Bounds {
+            x: 0.0,
+            y: 0.0,
+            width: 1920.0,
+            height: 1200.0,
+        };
+        let ws = ws.with_displays(vec![display_with(usable, grown)]);
+
+        assert!(
+            state.handle_display_change(&ws).is_some(),
+            "a physical_frame-only change must not take the unchanged early exit"
+        );
+        assert_eq!(
+            state.displays.get(&1).unwrap().physical_frame,
+            Rect::from_bounds(&grown),
+            "state must hold the new physical bounds"
+        );
     }
 
     #[test]

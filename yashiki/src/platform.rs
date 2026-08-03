@@ -808,6 +808,12 @@ pub mod mock {
                 width,
                 height,
             },
+            physical_frame: Bounds {
+                x,
+                y,
+                width,
+                height,
+            },
             is_main: id == 1,
         }
     }

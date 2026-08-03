@@ -97,7 +97,7 @@ pub fn execute_effects<M: WindowManipulator>(
             } => {
                 let applied = {
                     let state = state.borrow();
-                    let outer_gap = state.config.outer_gap;
+                    let outer_gap = state.outer_gap_for(display_id);
                     if let Some(display) = state.displays.get(&display_id) {
                         manipulator.set_window_frame(
                             window_id,

@@ -114,7 +114,11 @@ pub type DisplayId = u32;
 pub struct DisplayInfo {
     pub id: DisplayId,
     pub name: String,
+    /// Usable area: the physical bounds minus what the menu bar reserves.
     pub frame: Bounds,
+    /// Physical bounds as reported by CGDisplayBounds. Kept alongside `frame` so
+    /// consumers can tell how much is reserved without querying the OS again.
+    pub physical_frame: Bounds,
     pub is_main: bool,
 }
 
@@ -245,6 +249,7 @@ pub fn get_all_displays() -> Vec<DisplayInfo> {
 
             DisplayInfo {
                 id: display_id,
+                physical_frame: bounds,
                 name,
                 frame: Bounds {
                     x: bounds.x,

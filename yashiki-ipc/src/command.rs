@@ -750,8 +750,11 @@ pub enum Command {
     // Outer gap
     SetOuterGap {
         values: Vec<String>,
+        output: Option<OutputSpecifier>,
     },
-    GetOuterGap,
+    GetOuterGap {
+        output: Option<OutputSpecifier>,
+    },
 
     // Log level
     SetLogLevel {
@@ -820,10 +823,17 @@ pub struct BindingInfo {
 pub struct OutputInfo {
     pub id: u32,
     pub name: String,
+    /// Usable area: the physical bounds minus what the menu bar reserves.
     pub x: i32,
     pub y: i32,
     pub width: u32,
     pub height: u32,
+    /// Physical bounds of the display. The difference from the usable area tells
+    /// a subscriber how much is reserved, which is otherwise not derivable.
+    pub physical_x: i32,
+    pub physical_y: i32,
+    pub physical_width: u32,
+    pub physical_height: u32,
     pub is_main: bool,
     pub visible_tags: u32,
     pub is_focused: bool,
@@ -1776,6 +1786,7 @@ mod tests {
     fn test_command_set_outer_gap_serialization() {
         let cmd = Command::SetOuterGap {
             values: vec!["10".to_string()],
+            output: None,
         };
         let json = serde_json::to_string(&cmd).unwrap();
         assert!(json.contains("\"type\":\"set_outer_gap\""));
@@ -1783,8 +1794,9 @@ mod tests {
 
         let deserialized: Command = serde_json::from_str(&json).unwrap();
         match deserialized {
-            Command::SetOuterGap { values } => {
+            Command::SetOuterGap { values, output } => {
                 assert_eq!(values, vec!["10"]);
+                assert_eq!(output, None);
             }
             _ => panic!("Wrong variant"),
         }
@@ -1792,12 +1804,28 @@ mod tests {
         // With two values
         let cmd = Command::SetOuterGap {
             values: vec!["10".to_string(), "20".to_string()],
+            output: None,
         };
         let json = serde_json::to_string(&cmd).unwrap();
         let deserialized: Command = serde_json::from_str(&json).unwrap();
         match deserialized {
-            Command::SetOuterGap { values } => {
+            Command::SetOuterGap { values, output } => {
                 assert_eq!(values, vec!["10", "20"]);
+                assert_eq!(output, None);
+            }
+            _ => panic!("Wrong variant"),
+        }
+
+        // Targeting a specific display
+        let cmd = Command::SetOuterGap {
+            values: vec!["10".to_string()],
+            output: Some(OutputSpecifier::Id(1)),
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        let deserialized: Command = serde_json::from_str(&json).unwrap();
+        match deserialized {
+            Command::SetOuterGap { output, .. } => {
+                assert_eq!(output, Some(OutputSpecifier::Id(1)));
             }
             _ => panic!("Wrong variant"),
         }
@@ -1805,12 +1833,15 @@ mod tests {
 
     #[test]
     fn test_command_get_outer_gap_serialization() {
-        let cmd = Command::GetOuterGap;
+        let cmd = Command::GetOuterGap { output: None };
         let json = serde_json::to_string(&cmd).unwrap();
         assert!(json.contains("\"type\":\"get_outer_gap\""));
 
         let deserialized: Command = serde_json::from_str(&json).unwrap();
-        assert!(matches!(deserialized, Command::GetOuterGap));
+        assert!(matches!(
+            deserialized,
+            Command::GetOuterGap { output: None }
+        ));
     }
 
     #[test]

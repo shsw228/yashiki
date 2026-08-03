@@ -7,7 +7,7 @@ use crate::event::Event;
 use crate::macos::DisplayId;
 use crate::platform::WindowSystem;
 use yashiki_ipc::{
-    Direction, OutputDirection, OutputSpecifier, RuleAction, RuleMatcher, WindowRule,
+    Direction, OuterGap, OutputDirection, OutputSpecifier, RuleAction, RuleMatcher, WindowRule,
 };
 
 /// Information about a window that was ignored by rule, tracked for re-evaluation.
@@ -591,6 +591,15 @@ impl State {
         self.focused_display
     }
 
+    /// Outer gap in effect for a display: its own override if set, otherwise the
+    /// global default.
+    pub fn outer_gap_for(&self, display_id: DisplayId) -> OuterGap {
+        self.displays
+            .get(&display_id)
+            .and_then(|d| d.outer_gap)
+            .unwrap_or(self.config.outer_gap)
+    }
+
     pub fn get_target_display(
         &self,
         output: Option<&OutputSpecifier>,
@@ -829,6 +838,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::macos::{Bounds, DisplayInfo};
     use crate::platform::mock::{
         create_test_display, create_test_window, create_test_window_with_layer, MockWindowSystem,
     };
@@ -1455,6 +1465,39 @@ mod tests {
     }
 
     #[test]
+    fn test_outer_gap_falls_back_to_global() {
+        let ws = MockWindowSystem::new()
+            .with_displays(vec![
+                create_test_display(1, 0.0, 0.0, 1920.0, 1080.0),
+                create_test_display(2, 1920.0, 0.0, 1920.0, 1080.0),
+            ])
+            .with_windows(vec![])
+            .with_focused(None);
+
+        let mut state = State::new();
+        state.sync_all(&ws);
+        state.config.outer_gap = OuterGap::all(12);
+
+        assert_eq!(state.outer_gap_for(1), OuterGap::all(12));
+        assert_eq!(state.outer_gap_for(2), OuterGap::all(12));
+
+        // A per-display override only affects that display.
+        let override_gap = OuterGap {
+            top: 10,
+            right: 12,
+            bottom: 12,
+            left: 12,
+        };
+        state.displays.get_mut(&1).unwrap().outer_gap = Some(override_gap);
+
+        assert_eq!(state.outer_gap_for(1), override_gap);
+        assert_eq!(state.outer_gap_for(2), OuterGap::all(12));
+
+        // An unknown display falls back to the global value.
+        assert_eq!(state.outer_gap_for(99), OuterGap::all(12));
+    }
+
+    #[test]
     fn test_handle_display_change_display_added() {
         let ws1 = MockWindowSystem::new()
             .with_displays(vec![create_test_display(1, 0.0, 0.0, 1920.0, 1080.0)])
@@ -1485,6 +1528,63 @@ mod tests {
         assert_eq!(result.added[0].id, 2);
         assert!(result.removed.is_empty());
         assert_eq!(state.displays.len(), 2);
+    }
+
+    /// `physical_frame` is reported over IPC and is not derivable from `frame`, so a
+    /// change confined to it still has to be picked up. Taking the unchanged early exit
+    /// here would leave state serving the stale bounds with no event emitted.
+    #[test]
+    fn test_handle_display_change_physical_frame_only_change_is_not_a_no_op() {
+        let display_with = |frame: Bounds, physical_frame: Bounds| DisplayInfo {
+            id: 1,
+            name: "Display 1".to_string(),
+            frame,
+            physical_frame,
+            is_main: true,
+        };
+        let usable = Bounds {
+            x: 0.0,
+            y: 25.0,
+            width: 1920.0,
+            height: 1055.0,
+        };
+
+        let ws = MockWindowSystem::new()
+            .with_displays(vec![display_with(
+                usable,
+                Bounds {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 1920.0,
+                    height: 1080.0,
+                },
+            )])
+            .with_windows(vec![create_test_window(
+                100, 1000, "Safari", 100.0, 100.0, 800.0, 600.0,
+            )])
+            .with_focused(Some(100));
+
+        let mut state = State::new();
+        state.sync_all(&ws);
+
+        // Same usable frame, taller physical bounds: only `physical_frame` moved.
+        let grown = Bounds {
+            x: 0.0,
+            y: 0.0,
+            width: 1920.0,
+            height: 1200.0,
+        };
+        let ws = ws.with_displays(vec![display_with(usable, grown)]);
+
+        assert!(
+            state.handle_display_change(&ws).is_some(),
+            "a physical_frame-only change must not take the unchanged early exit"
+        );
+        assert_eq!(
+            state.displays.get(&1).unwrap().physical_frame,
+            Rect::from_bounds(&grown),
+            "state must hold the new physical bounds"
+        );
     }
 
     #[test]

@@ -46,6 +46,7 @@ pub fn handle_display_change<W: WindowSystem>(
                 display.name == info.name
                     && display.is_main == info.is_main
                     && display.frame == Rect::from_bounds(&info.frame)
+                    && display.physical_frame == Rect::from_bounds(&info.physical_frame)
             })
         });
         if unchanged {

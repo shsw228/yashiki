@@ -136,7 +136,8 @@ jobs:
         with:
           tag_name: fork-v${{ steps.info.outputs.version }}
           name: Yashiki-fork ${{ steps.info.outputs.version }}
-          prerelease: true
+          # cask の audit が prerelease を警告するので通常リリースにする
+          prerelease: false
           make_latest: false
           target_commitish: ${{ github.sha }}
           files: target/Yashiki-fork-arm64-${{ steps.info.outputs.version }}.zip

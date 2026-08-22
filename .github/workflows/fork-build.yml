@@ -1,0 +1,124 @@
+# fork 専用。upstream には送らない。
+#
+# local/integration（upstream への PR 3 本をまとめたブランチ）から
+# Yashiki-fork.app を作り、固定タグ fork-latest のプレリリースに publish する。
+# dotfiles の run_13_install-yashiki-fork.sh がそこから取得する。
+#
+# cask 版と共存させるため bundle ID を dev.typester.yashiki.fork にする。
+# macOS のアクセシビリティ許可は bundle ID 単位なので、これで両方に別々の
+# 許可を与えられる。
+#
+# 署名は必須にしてある。アドホック署名だとビルドごとに cdhash が変わり、
+# 入れ替えるたびにアクセシビリティ許可が外れて実用にならないため、
+# 証明書が無い場合は黙ってアドホックに落とさず失敗させる。
+name: Fork build
+
+on:
+  push:
+    branches: [local/integration]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Yashiki-fork.app
+    # upstream に混ざっても走らないようにする
+    if: github.repository == 'shsw228/yashiki'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Install signing certificate
+        id: signing
+        env:
+          CERTIFICATE_P12: ${{ secrets.CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CERTIFICATE_P12}" ]; then
+            echo "::error::CERTIFICATE_P12 secret is not set." \
+                 "An ad-hoc signed build would lose its Accessibility grant on every update," \
+                 "so this workflow refuses to produce one."
+            exit 1
+          fi
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          echo "$CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN_PATH" \
+            -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+          security set-key-partition-list -S apple-tool:,apple: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain
+
+          # 証明書の CN に依存せず、鍵の SHA-1 を identity として使う。
+          # codesign はハッシュ指定を受け付けるので、証明書を差し替えても
+          # ワークフローを直す必要がない。
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | awk 'NR==1 {print $2}')"
+          if [ -z "${IDENTITY}" ]; then
+            echo "::error::no codesigning identity found in the imported keychain"
+            exit 1
+          fi
+          echo "identity=${IDENTITY}" >> "$GITHUB_OUTPUT"
+
+      - name: Build .app bundle
+        env:
+          APP_BASENAME: Yashiki-fork
+          BUNDLE_ID: dev.typester.yashiki.fork
+          CODESIGN_IDENTITY: ${{ steps.signing.outputs.identity }}
+        run: ./scripts/build-app.sh --target aarch64-apple-darwin --release
+
+      - name: Verify the bundle is not ad-hoc signed
+        run: |
+          set -euo pipefail
+          APP=target/Yashiki-fork.app
+          codesign -dv "$APP" 2>&1 | tee /tmp/codesign.txt
+          grep -q "^Identifier=dev.typester.yashiki.fork$" /tmp/codesign.txt
+          # アドホック署名には TeamIdentifier が付かない
+          if grep -q "^TeamIdentifier=not set$" /tmp/codesign.txt; then
+            echo "::error::bundle is ad-hoc signed; refusing to publish"
+            exit 1
+          fi
+
+      - name: Write build info
+        id: info
+        run: |
+          set -euo pipefail
+          VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+          {
+            echo "sha=${GITHUB_SHA}"
+            echo "version=${VERSION}"
+            echo "ref=${GITHUB_REF_NAME}"
+          } > target/fork-build-info.txt
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          cat target/fork-build-info.txt
+
+      # 固定タグを使い回して、dotfiles 側の取得先を安定させる。
+      - name: Publish to the rolling fork-latest prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: fork-latest
+          name: Fork build (${{ steps.info.outputs.version }})
+          prerelease: true
+          make_latest: false
+          target_commitish: ${{ github.sha }}
+          files: |
+            target/Yashiki-fork-arm64-${{ steps.info.outputs.version }}.zip
+            target/fork-build-info.txt

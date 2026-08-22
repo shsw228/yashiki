@@ -107,7 +107,12 @@ else
     esac
 fi
 
-APP_NAME="Yashiki.app"
+# fork ビルドを cask 版と共存させるため、bundle 名と識別子を上書きできるようにする。
+# macOS のアクセシビリティ権限は bundle ID 単位なので、識別子を分けておくと
+# 両方に別々の許可を与えられる（片方を入れ替えても他方の許可が消えない）。
+APP_BASENAME="${APP_BASENAME:-Yashiki}"
+BUNDLE_ID="${BUNDLE_ID:-dev.typester.yashiki}"
+APP_NAME="${APP_BASENAME}.app"
 APP_DIR="${OUTPUT_DIR}/${APP_NAME}"
 
 echo "Creating ${APP_NAME}..."
@@ -129,6 +134,11 @@ cp "${PROJECT_ROOT}/resources/icon/Assets.car" "${APP_DIR}/Contents/Resources/"
 # Generate Info.plist
 sed "s/VERSION_PLACEHOLDER/${VERSION}/g" "${PROJECT_ROOT}/Info.plist.template" > "${APP_DIR}/Contents/Info.plist"
 
+# テンプレートは上流の識別子を持つので、上書き指定があれば当て直す。
+# codesign より前に行うこと（署名は Info.plist を含めて封じる）。
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${BUNDLE_ID}" "${APP_DIR}/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleName ${APP_BASENAME}" "${APP_DIR}/Contents/Info.plist"
+
 # Code signing (use CODESIGN_IDENTITY if set, otherwise ad-hoc signing)
 CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
 echo "Signing ${APP_NAME} with identity: ${CODESIGN_IDENTITY}"
@@ -143,7 +153,7 @@ if [[ "$RELEASE" == true ]]; then
     mkdir -p "${OUTPUT_DIR}/completions/zsh"
     cp "${PROJECT_ROOT}/completions/zsh/_yashiki" "${OUTPUT_DIR}/completions/zsh/"
 
-    ZIP_NAME="Yashiki${ARCH_SUFFIX}-${VERSION}.zip"
+    ZIP_NAME="${APP_BASENAME}${ARCH_SUFFIX}-${VERSION}.zip"
     echo "Creating ${ZIP_NAME}..."
     (cd "${OUTPUT_DIR}" && zip -r "${ZIP_NAME}" "${APP_NAME}" completions/)
     echo "Created: ${OUTPUT_DIR}/${ZIP_NAME}"

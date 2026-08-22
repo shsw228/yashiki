@@ -1,8 +1,12 @@
 # fork 専用。upstream には送らない。
 #
 # local/integration（upstream への PR 3 本をまとめたブランチ）から
-# Yashiki-fork.app を作り、固定タグ fork-latest のプレリリースに publish する。
-# dotfiles の run_13_install-yashiki-fork.sh がそこから取得する。
+# Yashiki-fork.app を作り、不変タグ fork-v<version> で publish する。
+# shsw228/homebrew-tap の workflow がこれを拾って cask を更新し、
+# dotfiles は brew 経由で入れる。
+#
+# タグを可変にしないのは cask が sha256 を固定するため。上流の version に
+# run_number を足して単調増加させる（同じ上流版を作り直しても衝突しない）。
 #
 # cask 版と共存させるため bundle ID を dev.typester.yashiki.fork にする。
 # macOS のアクセシビリティ許可は bundle ID 単位なので、これで両方に別々の
@@ -115,28 +119,24 @@ jobs:
             exit 1
           fi
 
-      - name: Write build info
+      # cask が参照するのでアセット名も fork の version に揃える。
+      - name: Determine the fork version
         id: info
         run: |
           set -euo pipefail
-          VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-          {
-            echo "sha=${GITHUB_SHA}"
-            echo "version=${VERSION}"
-            echo "ref=${GITHUB_REF_NAME}"
-          } > target/fork-build-info.txt
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          cat target/fork-build-info.txt
+          UPSTREAM="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+          FORK_VERSION="${UPSTREAM}.${GITHUB_RUN_NUMBER}"
+          mv "target/Yashiki-fork-arm64-${UPSTREAM}.zip" \
+             "target/Yashiki-fork-arm64-${FORK_VERSION}.zip"
+          echo "version=${FORK_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "fork version: ${FORK_VERSION}"
 
-      # 固定タグを使い回して、dotfiles 側の取得先を安定させる。
-      - name: Publish to the rolling fork-latest prerelease
+      - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: fork-latest
-          name: Fork build (${{ steps.info.outputs.version }})
+          tag_name: fork-v${{ steps.info.outputs.version }}
+          name: Yashiki-fork ${{ steps.info.outputs.version }}
           prerelease: true
           make_latest: false
           target_commitish: ${{ github.sha }}
-          files: |
-            target/Yashiki-fork-arm64-${{ steps.info.outputs.version }}.zip
-            target/fork-build-info.txt
+          files: target/Yashiki-fork-arm64-${{ steps.info.outputs.version }}.zip

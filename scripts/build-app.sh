@@ -142,7 +142,18 @@ sed "s/VERSION_PLACEHOLDER/${VERSION}/g" "${PROJECT_ROOT}/Info.plist.template" >
 # Code signing (use CODESIGN_IDENTITY if set, otherwise ad-hoc signing)
 CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
 echo "Signing ${APP_NAME} with identity: ${CODESIGN_IDENTITY}"
-codesign --force --deep -s "$CODESIGN_IDENTITY" "${APP_DIR}"
+
+# CODESIGN_REQUIREMENTS で designated requirement を差し替えられるようにする。
+# 既定 (未設定) では codesign が leaf の CN を焼き込むため、証明書を更新すると
+# 別のコード識別子になり、macOS が覚えたアクセシビリティ許可が失効する。
+# チーム ID で固定した要件を渡せば、同じチームの証明書に入れ替えても許可が続く。
+if [[ -n "${CODESIGN_REQUIREMENTS:-}" ]]; then
+    # codesign -r は引数をファイルパスと見るので、インライン式は "=" を前置する。
+    codesign --force --deep -s "$CODESIGN_IDENTITY" \
+        -r "=${CODESIGN_REQUIREMENTS}" "${APP_DIR}"
+else
+    codesign --force --deep -s "$CODESIGN_IDENTITY" "${APP_DIR}"
+fi
 
 echo "Created: ${APP_DIR}"
 

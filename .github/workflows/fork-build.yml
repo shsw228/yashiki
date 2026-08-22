@@ -78,14 +78,22 @@ jobs:
           fi
           echo "identity=${IDENTITY}" >> "$GITHUB_OUTPUT"
 
+      # designated requirement を証明書の CN ではなくチーム ID で固定する。
+      # 既定では codesign が leaf の CN を焼き込むため、証明書を更新すると別の
+      # コード識別子になり、macOS が覚えたアクセシビリティ許可が失効する。
+      # チーム ID なら同じチームの証明書に入れ替えても許可が続く。
       - name: Build .app bundle
         env:
           APP_BASENAME: Yashiki-fork
           BUNDLE_ID: dev.typester.yashiki.fork
           CODESIGN_IDENTITY: ${{ steps.signing.outputs.identity }}
+          CODESIGN_REQUIREMENTS: >-
+            designated => anchor apple generic
+            and certificate 1[field.1.2.840.113635.100.6.2.1]
+            and certificate leaf[subject.OU] = "3S7EA557V7"
         run: ./scripts/build-app.sh --target aarch64-apple-darwin --release
 
-      - name: Verify the bundle is not ad-hoc signed
+      - name: Verify signature and designated requirement
         run: |
           set -euo pipefail
           APP=target/Yashiki-fork.app
@@ -94,6 +102,16 @@ jobs:
           # アドホック署名には TeamIdentifier が付かない
           if grep -q "^TeamIdentifier=not set$" /tmp/codesign.txt; then
             echo "::error::bundle is ad-hoc signed; refusing to publish"
+            exit 1
+          fi
+          codesign --verify --deep --strict "$APP"
+          # DR がチーム ID で固定されていること。CN が焼き込まれていると
+          # 次に証明書を更新したときアクセシビリティ許可が失効する。
+          printf '%s\n' 'anchor apple generic and certificate leaf[subject.OU] = "3S7EA557V7"' \
+            > /tmp/req-team.txt
+          codesign --verify -R /tmp/req-team.txt "$APP"
+          if codesign -d --requirements - "$APP" 2>&1 | grep -q "subject.CN"; then
+            echo "::error::designated requirement still pins the certificate CN"
             exit 1
           fi
 

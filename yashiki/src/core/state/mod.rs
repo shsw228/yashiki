@@ -1573,6 +1573,51 @@ mod tests {
     }
 
     #[test]
+    fn test_handle_display_change_disconnect_retiles_all_remaining_displays() {
+        let ws1 = MockWindowSystem::new()
+            .with_displays(vec![
+                create_test_display(1, 0.0, 0.0, 1920.0, 1080.0),
+                create_test_display(2, 1920.0, 0.0, 1920.0, 1080.0),
+                create_test_display(3, 3840.0, 0.0, 1920.0, 1080.0),
+            ])
+            .with_windows(vec![
+                create_test_window(100, 1000, "Safari", 100.0, 100.0, 800.0, 600.0),
+                create_test_window(101, 1001, "Terminal", 3900.0, 100.0, 800.0, 600.0),
+            ])
+            .with_focused(Some(100));
+
+        let mut state = State::new();
+        state.sync_all(&ws1);
+        assert_eq!(state.displays.len(), 3);
+
+        // Remove display 3 (rightmost). Display 1 has no orphan moves but its
+        // coordinates may have shifted, so it must still appear in displays_to_retile.
+        let ws2 = MockWindowSystem::new()
+            .with_displays(vec![
+                create_test_display(1, 0.0, 0.0, 1920.0, 1080.0),
+                create_test_display(2, 1920.0, 0.0, 1920.0, 1080.0),
+            ])
+            .with_windows(vec![
+                create_test_window(100, 1000, "Safari", 100.0, 100.0, 800.0, 600.0),
+                create_test_window(101, 1001, "Terminal", 2000.0, 100.0, 800.0, 600.0),
+            ])
+            .with_focused(Some(100));
+
+        let result = state
+            .handle_display_change(&ws2)
+            .expect("display configuration changed");
+
+        assert!(
+            result.displays_to_retile.contains(&1),
+            "display 1 must be retiled even though no window was orphaned onto it"
+        );
+        assert!(
+            result.displays_to_retile.contains(&2),
+            "display 2 (orphan target) must be retiled"
+        );
+    }
+
+    #[test]
     fn test_handle_display_change_orphaned_windows() {
         let ws1 = MockWindowSystem::new()
             .with_displays(vec![

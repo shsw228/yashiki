@@ -144,7 +144,6 @@ pub fn handle_display_change<W: WindowSystem>(
     };
 
     let mut window_moves = Vec::new();
-    let mut affected_displays = HashSet::new();
 
     for window in state.windows.values_mut() {
         if removed_ids.contains(&window.display_id) {
@@ -155,13 +154,10 @@ pub fn handle_display_change<W: WindowSystem>(
                 window.display_id,
                 fallback_id
             );
-            // Record the original display for potential restoration on wake.
-            // Only set if not already orphaned (preserve the first orphan source for multi-stage disconnects).
             if window.orphaned_from.is_none() {
                 window.orphaned_from = Some(window.display_id);
             }
             window.display_id = fallback_id;
-            affected_displays.insert(fallback_id);
         }
     }
 
@@ -191,13 +187,15 @@ pub fn handle_display_change<W: WindowSystem>(
         .cloned()
         .collect();
 
-    for display_id in &affected_displays {
-        let moves = compute_layout_changes_for_display(state, *display_id);
+    // Retile all remaining displays, not just orphan targets: the surviving
+    // displays may have shifted coordinates when a neighbour was removed.
+    for &display_id in &current_ids {
+        let moves = compute_layout_changes_for_display(state, display_id);
         window_moves.extend(moves);
     }
     window_moves.extend(rehide_moves);
 
-    let displays_to_retile: Vec<_> = affected_displays.into_iter().collect();
+    let displays_to_retile: Vec<_> = current_ids.into_iter().collect();
 
     Some(DisplayChangeResult {
         window_moves,

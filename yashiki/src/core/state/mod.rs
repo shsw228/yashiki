@@ -661,16 +661,23 @@ impl State {
         event: &Event,
     ) -> (bool, Vec<WindowId>, Vec<WindowMove>) {
         match event {
-            Event::WindowCreated { pid } | Event::WindowDestroyed { pid } => {
-                self.sync_pid(ws, *pid)
-            }
-            Event::WindowMoved { pid }
+            // Move/resize/miniaturize events return their new window ids just like
+            // WindowCreated does. These syncs are where a window is first seen when
+            // no usable AXWindowCreated arrived for it (Finder's copy/trash progress
+            // window is one: it shows up, then immediately moves), and dropping the
+            // ids meant such a window was tiled without ever being matched against
+            // the rules.
+            //
+            // This used to discard them to avoid "applying rules again", but sync_pid
+            // only reports windows it just inserted into `self.windows`; windows that
+            // were already tracked are updated in a separate pass and never appear
+            // here. So there is nothing to re-apply, and returning the ids is safe.
+            Event::WindowCreated { pid }
+            | Event::WindowDestroyed { pid }
+            | Event::WindowMoved { pid }
             | Event::WindowResized { pid }
             | Event::WindowMiniaturized { pid }
-            | Event::WindowDeminiaturized { pid } => {
-                let (changed, _, rehide_moves) = self.sync_pid(ws, *pid);
-                (changed, vec![], rehide_moves)
-            }
+            | Event::WindowDeminiaturized { pid } => self.sync_pid(ws, *pid),
             Event::FocusedWindowChanged => {
                 let (changed, new_ids) = self.sync_focused_window(ws);
                 (changed, new_ids, vec![])
@@ -2439,6 +2446,40 @@ mod tests {
         assert_eq!(state.windows.len(), 1);
         let window = state.windows.get(&100).unwrap();
         assert!(window.is_floating);
+    }
+
+    #[test]
+    fn test_handle_event_returns_new_windows_discovered_on_move() {
+        // A window first seen during a move/resize sync (no usable AXWindowCreated,
+        // as with Finder's progress window) must still be reported as new, or the
+        // caller never applies rules to it and it gets tiled unconditionally.
+        let ws = MockWindowSystem::new()
+            .with_displays(vec![create_test_display(1, 0.0, 0.0, 1920.0, 1080.0)])
+            .with_windows(vec![create_test_window(
+                100, 1000, "Finder", 0.0, 0.0, 404.0, 88.0,
+            )]);
+
+        let mut state = State::new();
+
+        for event in [
+            Event::WindowMoved { pid: 1000 },
+            Event::WindowResized { pid: 1000 },
+            Event::WindowMiniaturized { pid: 1000 },
+            Event::WindowDeminiaturized { pid: 1000 },
+        ] {
+            let mut state = State::new();
+            let (_, new_ids, _) = state.handle_event(&ws, &event);
+            assert_eq!(new_ids, vec![100], "{event:?} dropped the new window id");
+        }
+
+        // A window already tracked is not reported again on a later move.
+        let (_, first_ids, _) = state.handle_event(&ws, &Event::WindowCreated { pid: 1000 });
+        assert_eq!(first_ids, vec![100]);
+        let (_, second_ids, _) = state.handle_event(&ws, &Event::WindowMoved { pid: 1000 });
+        assert!(
+            second_ids.is_empty(),
+            "an already tracked window must not be reported as new again"
+        );
     }
 
     #[test]

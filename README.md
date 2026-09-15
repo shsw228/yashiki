@@ -2,6 +2,17 @@
 
 macOS tiling window manager written in Rust.
 
+> [!NOTE]
+> **This fork is dormant.** It exists to build `Yashiki-fork.app` for a personal
+> Homebrew tap, with a few changes on `local/integration` that upstream does not
+> carry. As of 2026-09-15 it is no longer the window manager I run day to day, so
+> nothing here is being exercised and no further work is planned for now. Issues
+> and pull requests may go unanswered.
+>
+> The code is left in place rather than archived: the changes still apply, and the
+> fork can be picked back up if I return to it. For active development, see
+> [typester/yashiki](https://github.com/typester/yashiki) upstream.
+
 <img src="resources/screenshots/demo.png" width="800">
 
 ## Features
